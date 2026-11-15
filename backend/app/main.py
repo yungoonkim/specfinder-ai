@@ -6,7 +6,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import settings
-from app.routers import cars, notebooks
+from app.routers import ai_search, cars, notebooks
 
 _RANGE_FILTER_FIELDS = {
     "min_ram_gb", "max_ram_gb", "min_price_krw", "max_price_krw", "min_weight_kg", "max_weight_kg",
@@ -18,7 +18,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()],
     allow_credentials=False,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["Accept", "Content-Type"],
 )
 
@@ -35,9 +35,10 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
         if candidate in _RANGE_FILTER_FIELDS:
             field = candidate
             reason = validator_reason
+    is_ai_request = request.url.path == "/api/ai/search"
     return JSONResponse(status_code=422, content={
-        "code": "INVALID_FILTER",
-        "message": "검색 조건을 확인해 주세요.",
+        "code": "INVALID_AI_REQUEST" if is_ai_request else "INVALID_FILTER",
+        "message": "AI 검색 요청을 확인해 주세요." if is_ai_request else "검색 조건을 확인해 주세요.",
         "details": {"field": field, "reason": reason},
     })
 
@@ -74,3 +75,4 @@ def health():
 
 app.include_router(notebooks.router)
 app.include_router(cars.router)
+app.include_router(ai_search.router)
