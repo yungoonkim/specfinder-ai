@@ -8,6 +8,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.database import settings
 from app.routers import cars, notebooks
 
+_RANGE_FILTER_FIELDS = {
+    "min_ram_gb", "max_ram_gb", "min_price_krw", "max_price_krw", "min_weight_kg", "max_weight_kg",
+    "registration_year_min", "registration_year_max", "min_mileage_km", "max_mileage_km",
+}
+
 app = FastAPI(title="SpecFinder AI API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
@@ -23,10 +28,17 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
     errors = exc.errors()
     first = errors[0] if errors else {}
     field = ".".join(str(part) for part in first.get("loc", ())[1:]) or None
+    reason = first.get("msg", "invalid value")
+    if field is None and reason.startswith("Value error, "):
+        validator_reason = reason.removeprefix("Value error, ")
+        candidate = validator_reason.split(maxsplit=1)[0]
+        if candidate in _RANGE_FILTER_FIELDS:
+            field = candidate
+            reason = validator_reason
     return JSONResponse(status_code=422, content={
         "code": "INVALID_FILTER",
         "message": "검색 조건을 확인해 주세요.",
-        "details": {"field": field, "reason": first.get("msg", "invalid value")},
+        "details": {"field": field, "reason": reason},
     })
 
 

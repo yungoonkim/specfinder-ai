@@ -2,7 +2,7 @@ from decimal import Decimal
 from datetime import datetime
 from typing import Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 NotebookSort = Literal["id_asc", "price_asc", "price_desc", "ram_desc", "weight_asc", "newest_capture"]
 CarSort = Literal["id_asc", "price_asc", "price_desc", "mileage_asc", "year_desc", "newest_capture"]
@@ -104,6 +104,14 @@ class NotebookItem(BaseModel):
     os: str | None
     source_url: str | None
     captured_at: datetime | None
+
+    @field_serializer("ram_gb", "screen_inches", "weight_kg", when_used="json", return_type=int | float | None)
+    def serialize_numeric_specs(self, value: Decimal | None) -> int | float | None:
+        if value is None:
+            return None
+        if value == value.to_integral_value():
+            return int(value)
+        return float(value)
 
 
 class NotebookDetail(NotebookItem):
