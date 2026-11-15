@@ -385,10 +385,24 @@ def test_provider_failure_is_distinct_from_database_failure(client, monkeypatch)
     assert response.json()["code"] == "DB_UNAVAILABLE"
 
 
-def test_unconfigured_production_adapter_never_returns_fake_results(client):
-    response = client.post("/api/ai/search", json={"domain": "notebooks", "message": "RAM 16GB"})
+
+def test_unconfigured_production_adapter_never_returns_fake_results(
+    client, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        "app.ai_search.llm._VERTEX_ENV_FILE",
+        tmp_path / "missing.env",
+    )
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+
+    response = client.post(
+        "/api/ai/search",
+        json={"domain": "notebooks", "message": "RAM 16GB"},
+    )
+
     assert response.status_code == 503
     assert response.json()["code"] == "AI_MODEL_UNAVAILABLE"
+
 
 
 def test_untrusted_context_is_validated_before_model_or_search(client, monkeypatch):
