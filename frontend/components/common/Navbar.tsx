@@ -7,6 +7,7 @@ export default function Navbar() {
   const pathname = usePathname();
   const isNotebooks = pathname?.startsWith("/notebooks");
   const isCars = pathname?.startsWith("/cars");
+  const isAISearch = pathname?.startsWith("/ai-search");
 
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
@@ -47,6 +48,16 @@ export default function Navbar() {
             }`}
           >
             자동차 탭
+          </Link>
+          <Link
+            href="/ai-search"
+            className={`flex-1 sm:flex-initial text-center rounded-lg px-4 py-2 text-sm font-semibold transition ${
+              isAISearch
+                ? "bg-indigo-600 text-white shadow-sm"
+                : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+            }`}
+          >
+            AI 검색
           </Link>
         </nav>
       </div>

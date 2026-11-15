@@ -87,6 +87,34 @@ export default function HomePage() {
             </div>
           </div>
         </div>
+
+        <div className="mt-6 flex flex-col justify-between gap-4 rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50/80 via-blue-50/50 to-emerald-50/60 p-6 shadow-sm sm:flex-row sm:items-center">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-bold text-white">
+                Phase 2 · AI 자연어 검색
+              </span>
+              <span className="text-xs font-medium text-slate-500">
+                /ai-search
+              </span>
+            </div>
+            <h2 className="mt-3 text-lg font-bold text-slate-900 sm:text-xl">
+              대화형 자연어로 노트북·전기차 스펙과 매물을 바로 찾아보세요
+            </h2>
+            <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+              “150만 원 이하 RAM 16GB 이상 노트북”, “현대 전기차 3천만 원 이하”처럼
+              자연어로 질문하고, 후속 대화로 무게·정렬 등 조건을 이어서 좁힐 수 있습니다.
+            </p>
+          </div>
+          <div className="shrink-0">
+            <Link
+              href="/ai-search"
+              className="inline-flex w-full items-center justify-center rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 sm:w-auto"
+            >
+              AI 자연어 검색 시작하기 →
+            </Link>
+          </div>
+        </div>
       </section>
     </div>
   );

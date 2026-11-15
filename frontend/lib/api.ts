@@ -1,4 +1,8 @@
 import {
+  AIConversationContext,
+  AISearchDomain,
+  AISearchRequest,
+  AISearchResponse,
   ApiErrorPayload,
   ApiResultWithSource,
   CarDetail,
@@ -394,3 +398,219 @@ export async function getCarDetail(
     throw err;
   }
 }
+
+export const ALLOWED_NOTEBOOK_FILTER_KEYS = [
+  "manufacturer",
+  "cpu_vendor",
+  "cpu_series",
+  "gpu_type",
+  "min_ram_gb",
+  "max_ram_gb",
+  "min_price_krw",
+  "max_price_krw",
+  "min_weight_kg",
+  "max_weight_kg",
+  "page",
+  "page_size",
+  "sort",
+] as const;
+
+export const ALLOWED_CAR_FILTER_KEYS = [
+  "manufacturer",
+  "model",
+  "registration_year_min",
+  "registration_year_max",
+  "min_mileage_km",
+  "max_mileage_km",
+  "min_price_krw",
+  "max_price_krw",
+  "branch_or_region",
+  "page",
+  "page_size",
+  "sort",
+] as const;
+
+export function sanitizeAIConversationFilters(
+  domain: AISearchDomain,
+  rawFilters: Record<string, unknown> | null | undefined
+): Record<string, unknown> {
+  if (!rawFilters || typeof rawFilters !== "object") {
+    return {};
+  }
+  const allowedSet = new Set<string>(
+    domain === "notebooks"
+      ? ALLOWED_NOTEBOOK_FILTER_KEYS
+      : ALLOWED_CAR_FILTER_KEYS
+  );
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(rawFilters)) {
+    if (!allowedSet.has(key)) {
+      continue;
+    }
+    if (value === null || value === undefined || value === "") {
+      continue;
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!trimmed || trimmed.length > 200) {
+        continue;
+      }
+      sanitized[key] = trimmed;
+      continue;
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+}
+
+export function buildConditionSearchUrl(
+  domain: AISearchDomain,
+  appliedFilters: Record<string, unknown> | null | undefined
+): string {
+  const basePath = domain === "notebooks" ? "/notebooks" : "/cars";
+  const sanitized = sanitizeAIConversationFilters(domain, appliedFilters);
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(sanitized)) {
+    if (key === "page" || key === "page_size") {
+      continue;
+    }
+    if (key === "sort" && value === "id_asc") {
+      continue;
+    }
+    params.set(key, String(value));
+  }
+  const qs = params.toString();
+  return qs ? `${basePath}?${qs}` : basePath;
+}
+
+export async function searchAI(
+  request: AISearchRequest,
+  options: { signal?: AbortSignal } = {}
+): Promise<AISearchResponse> {
+  const trimmedMessage = request.message.trim();
+  if (!trimmedMessage) {
+    throw new ApiClientError(
+      422,
+      "INVALID_AI_REQUEST",
+      "검색할 문장을 입력해 주세요.",
+      { field: "message", reason: "message must not be blank" }
+    );
+  }
+  if (trimmedMessage.length > 2000) {
+    throw new ApiClientError(
+      422,
+      "INVALID_AI_REQUEST",
+      "질문은 최대 2,000자까지 입력할 수 있습니다.",
+      { field: "message", reason: "message may not exceed 2000 characters" }
+    );
+  }
+
+  let safeContext: AIConversationContext | null = null;
+  if (
+    request.conversation_context &&
+    (!request.domain ||
+      request.conversation_context.domain === request.domain)
+  ) {
+    safeContext = {
+      domain: request.conversation_context.domain,
+      filters: sanitizeAIConversationFilters(
+        request.conversation_context.domain,
+        request.conversation_context.filters
+      ),
+    };
+  }
+
+  const payload: AISearchRequest = {
+    domain: request.domain ?? null,
+    message: trimmedMessage,
+    conversation_context: safeContext,
+  };
+
+  const url = `${API_BASE_URL}/api/ai/search`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      cache: "no-store",
+      signal: options.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw err;
+    }
+    throw new ApiClientError(
+      0,
+      "NETWORK_ERROR",
+      `FastAPI 서버(${API_BASE_URL})에 연결할 수 없습니다. 백엔드 서버가 실행 중인지 확인해 주세요.`,
+      { url }
+    );
+  }
+
+  if (!response.ok) {
+    let errorBody: Record<string, unknown> | null = null;
+    try {
+      errorBody = (await response.json()) as Record<string, unknown>;
+    } catch {
+      errorBody = null;
+    }
+
+    const nestedDetail =
+      errorBody &&
+      typeof errorBody.detail === "object" &&
+      errorBody.detail !== null
+        ? (errorBody.detail as Record<string, unknown>)
+        : null;
+    const sourceObj = nestedDetail ?? errorBody;
+
+    const rawCode =
+      sourceObj && typeof sourceObj.code === "string"
+        ? sourceObj.code
+        : undefined;
+    const rawMessage =
+      sourceObj && typeof sourceObj.message === "string"
+        ? sourceObj.message
+        : undefined;
+    const rawDetails =
+      sourceObj &&
+      typeof sourceObj.details === "object" &&
+      sourceObj.details !== null
+        ? (sourceObj.details as Record<string, unknown>)
+        : null;
+
+    const code =
+      rawCode ||
+      (response.status === 422
+        ? "INVALID_AI_REQUEST"
+        : response.status === 502
+        ? "AI_MODEL_ERROR"
+        : response.status === 503
+        ? "AI_MODEL_UNAVAILABLE"
+        : "INTERNAL_ERROR");
+
+    const message =
+      rawMessage ||
+      (code === "INVALID_AI_REQUEST"
+        ? "AI 검색 요청 또는 대화 조건을 확인해 주세요."
+        : code === "AI_OUTPUT_INVALID"
+        ? "AI 모델 응답을 처리할 수 없습니다."
+        : code === "AI_MODEL_ERROR"
+        ? "AI 모델 요청에 실패했습니다."
+        : code === "AI_MODEL_UNAVAILABLE"
+        ? "AI 모델이 설정되지 않았습니다."
+        : code === "DB_UNAVAILABLE"
+        ? "데이터베이스에 연결할 수 없습니다."
+        : "AI 검색 요청 처리 중 오류가 발생했습니다.");
+
+    throw new ApiClientError(response.status, code, message, rawDetails);
+  }
+
+  return (await response.json()) as AISearchResponse;
+}
+

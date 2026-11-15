@@ -149,3 +149,31 @@ export interface ApiResultWithSource<T> {
   data: T;
   source: DataSourceMode;
 }
+
+export type AISearchDomain = "notebooks" | "cars";
+
+export interface AIConversationContext {
+  domain: AISearchDomain;
+  filters?: Record<string, unknown>;
+}
+
+export interface AISearchRequest {
+  domain?: AISearchDomain | null;
+  message: string;
+  conversation_context?: AIConversationContext | null;
+}
+
+export interface AISearchResponse {
+  domain: AISearchDomain | null;
+  applied_filters: Record<string, unknown>;
+  clarification_required: boolean;
+  clarification_question: string | null;
+  items: Array<NotebookItem | CarItem>;
+  total: number | null;
+  page: number | null;
+  page_size: number | null;
+  total_pages: number | null;
+  answer: string;
+  data_notice: string;
+}
+
