@@ -11,7 +11,14 @@ import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
 import LoadingState from "@/components/common/LoadingState";
 import Pagination from "@/components/common/Pagination";
-import { ApiClientError, getCarFacets, searchCars } from "@/lib/api";
+import {
+  ApiClientError,
+  DEFAULT_ALLOW_MOCK_FALLBACK,
+  getCarFacets,
+  getStoredMockFallbackPreference,
+  searchCars,
+  setStoredMockFallbackPreference,
+} from "@/lib/api";
 import {
   CarFacetsResponse,
   CarFilterParams,
@@ -38,6 +45,8 @@ const CAR_SORT_LABELS: Record<CarSortOption, string> = {
   newest_capture: "수집 날짜 최신순",
 };
 
+const PAGE_SIZE_OPTIONS = [20, 50, 100];
+
 const EMPTY_CAR_FACETS: CarFacetsResponse = {
   manufacturer: [],
   model: [],
@@ -56,7 +65,7 @@ function CarsSearchContent() {
   const searchParams = useSearchParams();
 
   const [allowMockFallback, setAllowMockFallback] = useState<boolean>(
-    process.env.NEXT_PUBLIC_USE_MOCK !== "false"
+    DEFAULT_ALLOW_MOCK_FALLBACK
   );
   const [facets, setFacets] = useState<CarFacetsResponse>(EMPTY_CAR_FACETS);
   const [result, setResult] = useState<CarSearchResponse | null>(null);
@@ -68,6 +77,16 @@ function CarsSearchContent() {
     details?: Record<string, unknown> | null;
   } | null>(null);
   const [reloadTick, setReloadTick] = useState<number>(0);
+
+  useEffect(() => {
+    setAllowMockFallback(getStoredMockFallbackPreference());
+  }, []);
+
+  const handleToggleMockFallback = (allow: boolean) => {
+    setStoredMockFallbackPreference(allow);
+    setAllowMockFallback(allow);
+    setReloadTick((t) => t + 1);
+  };
 
   const currentParams: CarFilterParams = useMemo(() => {
     const rawSort = searchParams.get("sort");
@@ -211,10 +230,88 @@ function CarsSearchContent() {
     });
   };
 
+  const handlePageSizeChange = (nextSize: number) => {
+    updateUrlParams({
+      ...currentParams,
+      page_size: nextSize,
+      page: 1, // 페이지 크기 변경 시 페이지 1로 초기화
+    });
+  };
+
   const handlePageChange = (nextPage: number) => {
     updateUrlParams({
       ...currentParams,
       page: nextPage,
+    });
+  };
+
+  const activeFilterChips = useMemo(() => {
+    const chips: Array<{
+      key: keyof CarFilterParams;
+      label: string;
+    }> = [];
+    if (currentParams.manufacturer) {
+      chips.push({
+        key: "manufacturer",
+        label: `제조사: ${currentParams.manufacturer}`,
+      });
+    }
+    if (currentParams.model) {
+      chips.push({
+        key: "model",
+        label: `모델: ${currentParams.model}`,
+      });
+    }
+    if (currentParams.branch_or_region) {
+      chips.push({
+        key: "branch_or_region",
+        label: `지역: ${currentParams.branch_or_region}`,
+      });
+    }
+    if (currentParams.registration_year_min !== undefined) {
+      chips.push({
+        key: "registration_year_min",
+        label: `등록연도 ≥ ${currentParams.registration_year_min}년`,
+      });
+    }
+    if (currentParams.registration_year_max !== undefined) {
+      chips.push({
+        key: "registration_year_max",
+        label: `등록연도 ≤ ${currentParams.registration_year_max}년`,
+      });
+    }
+    if (currentParams.min_price_krw !== undefined) {
+      chips.push({
+        key: "min_price_krw",
+        label: `희망가 ≥ ${currentParams.min_price_krw.toLocaleString("ko-KR")}원`,
+      });
+    }
+    if (currentParams.max_price_krw !== undefined) {
+      chips.push({
+        key: "max_price_krw",
+        label: `희망가 ≤ ${currentParams.max_price_krw.toLocaleString("ko-KR")}원`,
+      });
+    }
+    if (currentParams.min_mileage_km !== undefined) {
+      chips.push({
+        key: "min_mileage_km",
+        label: `주행거리 ≥ ${currentParams.min_mileage_km.toLocaleString("ko-KR")}km`,
+      });
+    }
+    if (currentParams.max_mileage_km !== undefined) {
+      chips.push({
+        key: "max_mileage_km",
+        label: `주행거리 ≤ ${currentParams.max_mileage_km.toLocaleString("ko-KR")}km`,
+      });
+    }
+    return chips;
+  }, [currentParams]);
+
+  const removeSingleFilter = (key: keyof CarFilterParams) => {
+    updateUrlParams({
+      ...currentParams,
+      [key]: undefined,
+      page: 1,
     });
   };
 
@@ -236,10 +333,7 @@ function CarsSearchContent() {
       <DataSourceBanner
         source={dataSource}
         allowMockFallback={allowMockFallback}
-        onToggleMockFallback={(allow) => {
-          setAllowMockFallback(allow);
-          setReloadTick((t) => t + 1);
-        }}
+        onToggleMockFallback={handleToggleMockFallback}
         onRetryApi={() => setReloadTick((t) => t + 1)}
       />
 
@@ -287,8 +381,55 @@ function CarsSearchContent() {
                   </option>
                 ))}
               </select>
+
+              <label
+                htmlFor="car-page-size"
+                className="sr-only"
+              >
+                페이지당 표시 개수
+              </label>
+              <select
+                id="car-page-size"
+                value={currentParams.page_size ?? 20}
+                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 shadow-sm focus:border-emerald-600 focus:outline-none"
+              >
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {size}개씩 보기
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
+
+          {activeFilterChips.length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-1.5 rounded-xl border border-emerald-100 bg-emerald-50/60 px-3.5 py-2.5">
+              <span className="mr-1 text-xs font-semibold text-emerald-900">
+                적용된 필터:
+              </span>
+              {activeFilterChips.map((chip) => (
+                <button
+                  key={chip.key}
+                  type="button"
+                  onClick={() => removeSingleFilter(chip.key)}
+                  className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white px-2.5 py-0.5 text-xs font-medium text-emerald-800 transition hover:bg-emerald-100"
+                >
+                  <span>{chip.label}</span>
+                  <span aria-hidden="true" className="font-bold text-emerald-600">
+                    ×
+                  </span>
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="ml-auto text-xs font-semibold text-emerald-700 underline hover:text-emerald-900"
+              >
+                전체 해제
+              </button>
+            </div>
+          )}
 
           {loading ? (
             <LoadingState message="전기차 매물 데이터를 조회하고 있습니다..." />
@@ -301,10 +442,7 @@ function CarsSearchContent() {
               onResetFilters={handleResetFilters}
               onEnableMockFallback={
                 !allowMockFallback
-                  ? () => {
-                      setAllowMockFallback(true);
-                      setReloadTick((t) => t + 1);
-                    }
+                  ? () => handleToggleMockFallback(true)
                   : undefined
               }
             />
@@ -327,6 +465,7 @@ function CarsSearchContent() {
                 totalPages={result.total_pages}
                 total={result.total}
                 pageSize={result.page_size}
+                accentColor="emerald"
                 onPageChange={handlePageChange}
               />
             </>

@@ -5,6 +5,7 @@ interface PaginationProps {
   totalPages: number;
   total: number;
   pageSize: number;
+  accentColor?: "blue" | "emerald";
   onPageChange: (nextPage: number) => void;
 }
 
@@ -13,6 +14,7 @@ export default function Pagination({
   totalPages,
   total,
   pageSize,
+  accentColor = "blue",
   onPageChange,
 }: PaginationProps) {
   if (total === 0 || totalPages <= 0) {
@@ -32,13 +34,21 @@ export default function Pagination({
     pages.push(p);
   }
 
+  const activeButtonClass =
+    accentColor === "emerald"
+      ? "bg-emerald-600 text-white shadow-sm"
+      : "bg-blue-600 text-white shadow-sm";
+
   return (
     <nav
       aria-label="페이지네이션"
       className="mt-6 flex flex-col items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 sm:flex-row"
     >
-      <div className="text-xs text-slate-600">
-        총 <strong className="font-semibold text-slate-900">{total.toLocaleString("ko-KR")}</strong>
+      <div className="text-center text-xs text-slate-600 sm:text-left">
+        총{" "}
+        <strong className="font-semibold text-slate-900">
+          {total.toLocaleString("ko-KR")}
+        </strong>
         건 중{" "}
         <strong className="font-semibold text-slate-900">
           {page} / {totalPages}
@@ -46,7 +56,7 @@ export default function Pagination({
         페이지 (페이지당 {pageSize}건)
       </div>
 
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center justify-center gap-1.5">
         <button
           type="button"
           disabled={page <= 1}
@@ -79,7 +89,7 @@ export default function Pagination({
             aria-current={p === page ? "page" : undefined}
             className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
               p === page
-                ? "bg-blue-600 text-white shadow-sm"
+                ? activeButtonClass
                 : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
             }`}
           >

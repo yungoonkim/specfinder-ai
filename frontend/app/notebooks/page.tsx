@@ -13,8 +13,11 @@ import NotebookFilterPanel, {
 } from "@/components/notebooks/NotebookFilterPanel";
 import {
   ApiClientError,
+  DEFAULT_ALLOW_MOCK_FALLBACK,
   getNotebookFacets,
+  getStoredMockFallbackPreference,
   searchNotebooks,
+  setStoredMockFallbackPreference,
 } from "@/lib/api";
 import {
   DataSourceMode,
@@ -42,6 +45,8 @@ const SORT_LABELS: Record<NotebookSortOption, string> = {
   newest_capture: "수집 날짜 최신순",
 };
 
+const PAGE_SIZE_OPTIONS = [20, 50, 100];
+
 const EMPTY_FACETS: NotebookFacetsResponse = {
   manufacturer: [],
   cpu_vendor: [],
@@ -67,7 +72,7 @@ function NotebooksSearchContent() {
   const searchParams = useSearchParams();
 
   const [allowMockFallback, setAllowMockFallback] = useState<boolean>(
-    process.env.NEXT_PUBLIC_USE_MOCK !== "false"
+    DEFAULT_ALLOW_MOCK_FALLBACK
   );
   const [facets, setFacets] = useState<NotebookFacetsResponse>(EMPTY_FACETS);
   const [result, setResult] = useState<NotebookSearchResponse | null>(null);
@@ -79,6 +84,16 @@ function NotebooksSearchContent() {
     details?: Record<string, unknown> | null;
   } | null>(null);
   const [reloadTick, setReloadTick] = useState<number>(0);
+
+  useEffect(() => {
+    setAllowMockFallback(getStoredMockFallbackPreference());
+  }, []);
+
+  const handleToggleMockFallback = (allow: boolean) => {
+    setStoredMockFallbackPreference(allow);
+    setAllowMockFallback(allow);
+    setReloadTick((t) => t + 1);
+  };
 
   const currentParams: NotebookFilterParams = useMemo(() => {
     const rawSort = searchParams.get("sort");
@@ -221,10 +236,94 @@ function NotebooksSearchContent() {
     });
   };
 
+  const handlePageSizeChange = (nextSize: number) => {
+    updateUrlParams({
+      ...currentParams,
+      page_size: nextSize,
+      page: 1, // 페이지 크기 변경 시 페이지 1로 초기화
+    });
+  };
+
   const handlePageChange = (nextPage: number) => {
     updateUrlParams({
       ...currentParams,
       page: nextPage,
+    });
+  };
+
+  const activeFilterChips = useMemo(() => {
+    const chips: Array<{
+      key: keyof NotebookFilterParams;
+      label: string;
+    }> = [];
+    if (currentParams.manufacturer) {
+      chips.push({
+        key: "manufacturer",
+        label: `제조사: ${currentParams.manufacturer}`,
+      });
+    }
+    if (currentParams.cpu_vendor) {
+      chips.push({
+        key: "cpu_vendor",
+        label: `CPU 제조사: ${currentParams.cpu_vendor}`,
+      });
+    }
+    if (currentParams.cpu_series) {
+      chips.push({
+        key: "cpu_series",
+        label: `CPU 시리즈: ${currentParams.cpu_series}`,
+      });
+    }
+    if (currentParams.gpu_type) {
+      chips.push({
+        key: "gpu_type",
+        label: `GPU 유형: ${currentParams.gpu_type}`,
+      });
+    }
+    if (currentParams.min_ram_gb !== undefined) {
+      chips.push({
+        key: "min_ram_gb",
+        label: `RAM ≥ ${currentParams.min_ram_gb}GB`,
+      });
+    }
+    if (currentParams.max_ram_gb !== undefined) {
+      chips.push({
+        key: "max_ram_gb",
+        label: `RAM ≤ ${currentParams.max_ram_gb}GB`,
+      });
+    }
+    if (currentParams.min_price_krw !== undefined) {
+      chips.push({
+        key: "min_price_krw",
+        label: `최저가 ≥ ${currentParams.min_price_krw.toLocaleString("ko-KR")}원`,
+      });
+    }
+    if (currentParams.max_price_krw !== undefined) {
+      chips.push({
+        key: "max_price_krw",
+        label: `최저가 ≤ ${currentParams.max_price_krw.toLocaleString("ko-KR")}원`,
+      });
+    }
+    if (currentParams.min_weight_kg !== undefined) {
+      chips.push({
+        key: "min_weight_kg",
+        label: `무게 ≥ ${currentParams.min_weight_kg}kg`,
+      });
+    }
+    if (currentParams.max_weight_kg !== undefined) {
+      chips.push({
+        key: "max_weight_kg",
+        label: `무게 ≤ ${currentParams.max_weight_kg}kg`,
+      });
+    }
+    return chips;
+  }, [currentParams]);
+
+  const removeSingleFilter = (key: keyof NotebookFilterParams) => {
+    updateUrlParams({
+      ...currentParams,
+      [key]: undefined,
+      page: 1,
     });
   };
 
@@ -244,10 +343,7 @@ function NotebooksSearchContent() {
       <DataSourceBanner
         source={dataSource}
         allowMockFallback={allowMockFallback}
-        onToggleMockFallback={(allow) => {
-          setAllowMockFallback(allow);
-          setReloadTick((t) => t + 1);
-        }}
+        onToggleMockFallback={handleToggleMockFallback}
         onRetryApi={() => setReloadTick((t) => t + 1)}
       />
 
@@ -295,8 +391,55 @@ function NotebooksSearchContent() {
                   </option>
                 ))}
               </select>
+
+              <label
+                htmlFor="notebook-page-size"
+                className="sr-only"
+              >
+                페이지당 표시 개수
+              </label>
+              <select
+                id="notebook-page-size"
+                value={currentParams.page_size ?? 20}
+                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none"
+              >
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {size}개씩 보기
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
+
+          {activeFilterChips.length > 0 && (
+            <div className="mb-4 flex flex-wrap items-center gap-1.5 rounded-xl border border-blue-100 bg-blue-50/60 px-3.5 py-2.5">
+              <span className="mr-1 text-xs font-semibold text-blue-900">
+                적용된 필터:
+              </span>
+              {activeFilterChips.map((chip) => (
+                <button
+                  key={chip.key}
+                  type="button"
+                  onClick={() => removeSingleFilter(chip.key)}
+                  className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-white px-2.5 py-0.5 text-xs font-medium text-blue-800 transition hover:bg-blue-100"
+                >
+                  <span>{chip.label}</span>
+                  <span aria-hidden="true" className="font-bold text-blue-500">
+                    ×
+                  </span>
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="ml-auto text-xs font-semibold text-blue-700 underline hover:text-blue-900"
+              >
+                전체 해제
+              </button>
+            </div>
+          )}
 
           {loading ? (
             <LoadingState message="노트북 스펙 데이터를 조회하고 있습니다..." />
@@ -309,10 +452,7 @@ function NotebooksSearchContent() {
               onResetFilters={handleResetFilters}
               onEnableMockFallback={
                 !allowMockFallback
-                  ? () => {
-                      setAllowMockFallback(true);
-                      setReloadTick((t) => t + 1);
-                    }
+                  ? () => handleToggleMockFallback(true)
                   : undefined
               }
             />
@@ -335,6 +475,7 @@ function NotebooksSearchContent() {
                 totalPages={result.total_pages}
                 total={result.total}
                 pageSize={result.page_size}
+                accentColor="blue"
                 onPageChange={handlePageChange}
               />
             </>

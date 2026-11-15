@@ -24,6 +24,34 @@ export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ||
   "http://localhost:8000";
 
+export const DEFAULT_ALLOW_MOCK_FALLBACK =
+  process.env.NEXT_PUBLIC_USE_MOCK !== "false";
+
+const MOCK_PREF_STORAGE_KEY = "specfinder_allow_mock_fallback";
+
+export function getStoredMockFallbackPreference(): boolean {
+  if (typeof window === "undefined") {
+    return DEFAULT_ALLOW_MOCK_FALLBACK;
+  }
+  try {
+    const stored = window.sessionStorage.getItem(MOCK_PREF_STORAGE_KEY);
+    if (stored === "true") return true;
+    if (stored === "false") return false;
+  } catch {
+    // Ignore sessionStorage errors in restricted environments
+  }
+  return DEFAULT_ALLOW_MOCK_FALLBACK;
+}
+
+export function setStoredMockFallbackPreference(allow: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(MOCK_PREF_STORAGE_KEY, String(allow));
+  } catch {
+    // Ignore sessionStorage errors
+  }
+}
+
 export class ApiClientError extends Error {
   public readonly status: number;
   public readonly code: string;
@@ -206,7 +234,8 @@ export async function checkHealth(
 export async function getNotebookFacets(
   options: RequestOptions = {}
 ): Promise<ApiResultWithSource<NotebookFacetsResponse>> {
-  const allowMock = options.allowMockFallback ?? true;
+  const allowMock =
+    options.allowMockFallback ?? getStoredMockFallbackPreference();
   try {
     const data = await fetchJson<NotebookFacetsResponse>(
       "/api/notebooks/facets",
@@ -230,7 +259,8 @@ export async function searchNotebooks(
   options: RequestOptions = {}
 ): Promise<ApiResultWithSource<NotebookSearchResponse>> {
   validateNotebookRanges(params);
-  const allowMock = options.allowMockFallback ?? true;
+  const allowMock =
+    options.allowMockFallback ?? getStoredMockFallbackPreference();
   const qs = buildQueryString(params as Record<string, unknown>);
   try {
     const data = await fetchJson<NotebookSearchResponse>(
@@ -254,7 +284,8 @@ export async function getNotebookDetail(
   productCode: string,
   options: RequestOptions = {}
 ): Promise<ApiResultWithSource<NotebookDetail>> {
-  const allowMock = options.allowMockFallback ?? true;
+  const allowMock =
+    options.allowMockFallback ?? getStoredMockFallbackPreference();
   const encoded = encodeURIComponent(productCode);
   try {
     const data = await fetchJson<NotebookDetail>(
@@ -285,7 +316,8 @@ export async function getNotebookDetail(
 export async function getCarFacets(
   options: RequestOptions = {}
 ): Promise<ApiResultWithSource<CarFacetsResponse>> {
-  const allowMock = options.allowMockFallback ?? true;
+  const allowMock =
+    options.allowMockFallback ?? getStoredMockFallbackPreference();
   try {
     const data = await fetchJson<CarFacetsResponse>(
       "/api/cars/facets",
@@ -309,7 +341,8 @@ export async function searchCars(
   options: RequestOptions = {}
 ): Promise<ApiResultWithSource<CarSearchResponse>> {
   validateCarRanges(params);
-  const allowMock = options.allowMockFallback ?? true;
+  const allowMock =
+    options.allowMockFallback ?? getStoredMockFallbackPreference();
   const qs = buildQueryString(params as Record<string, unknown>);
   try {
     const data = await fetchJson<CarSearchResponse>(
@@ -333,7 +366,8 @@ export async function getCarDetail(
   listingId: string,
   options: RequestOptions = {}
 ): Promise<ApiResultWithSource<CarDetail>> {
-  const allowMock = options.allowMockFallback ?? true;
+  const allowMock =
+    options.allowMockFallback ?? getStoredMockFallbackPreference();
   const encoded = encodeURIComponent(listingId);
   try {
     const data = await fetchJson<CarDetail>(

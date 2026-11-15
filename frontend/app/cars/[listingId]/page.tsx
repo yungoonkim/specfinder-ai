@@ -6,13 +6,20 @@ import CarThumbnail from "@/components/common/CarThumbnail";
 import DataSourceBanner from "@/components/common/DataSourceBanner";
 import ErrorState from "@/components/common/ErrorState";
 import LoadingState from "@/components/common/LoadingState";
-import { ApiClientError, getCarDetail } from "@/lib/api";
+import {
+  ApiClientError,
+  DEFAULT_ALLOW_MOCK_FALLBACK,
+  getCarDetail,
+  getStoredMockFallbackPreference,
+  setStoredMockFallbackPreference,
+} from "@/lib/api";
 import {
   formatCapturedDate,
   formatNumberUnit,
   formatPriceKrw,
   formatRegistration,
   formatText,
+  safeDecodeURIComponent,
 } from "@/lib/format";
 import { CarDetail, DataSourceMode } from "@/types/api";
 
@@ -23,10 +30,10 @@ interface CarDetailPageProps {
 }
 
 export default function CarDetailPage({ params }: CarDetailPageProps) {
-  const decodedListingId = decodeURIComponent(params.listingId);
+  const decodedListingId = safeDecodeURIComponent(params.listingId);
 
   const [allowMockFallback, setAllowMockFallback] = useState<boolean>(
-    process.env.NEXT_PUBLIC_USE_MOCK !== "false"
+    DEFAULT_ALLOW_MOCK_FALLBACK
   );
   const [detail, setDetail] = useState<CarDetail | null>(null);
   const [dataSource, setDataSource] = useState<DataSourceMode | null>(null);
@@ -37,6 +44,16 @@ export default function CarDetailPage({ params }: CarDetailPageProps) {
     details?: Record<string, unknown> | null;
   } | null>(null);
   const [reloadTick, setReloadTick] = useState<number>(0);
+
+  useEffect(() => {
+    setAllowMockFallback(getStoredMockFallbackPreference());
+  }, []);
+
+  const handleToggleMockFallback = (allow: boolean) => {
+    setStoredMockFallbackPreference(allow);
+    setAllowMockFallback(allow);
+    setReloadTick((t) => t + 1);
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -79,7 +96,7 @@ export default function CarDetailPage({ params }: CarDetailPageProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <Link
           href="/cars"
           className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
@@ -94,10 +111,7 @@ export default function CarDetailPage({ params }: CarDetailPageProps) {
       <DataSourceBanner
         source={dataSource}
         allowMockFallback={allowMockFallback}
-        onToggleMockFallback={(allow) => {
-          setAllowMockFallback(allow);
-          setReloadTick((t) => t + 1);
-        }}
+        onToggleMockFallback={handleToggleMockFallback}
         onRetryApi={() => setReloadTick((t) => t + 1)}
       />
 
@@ -114,10 +128,7 @@ export default function CarDetailPage({ params }: CarDetailPageProps) {
           onRetry={() => setReloadTick((t) => t + 1)}
           onEnableMockFallback={
             !allowMockFallback
-              ? () => {
-                  setAllowMockFallback(true);
-                  setReloadTick((t) => t + 1);
-                }
+              ? () => handleToggleMockFallback(true)
               : undefined
           }
         />

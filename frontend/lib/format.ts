@@ -1,5 +1,13 @@
 const INFO_MISSING = "정보 없음";
 
+export function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 export function formatText(value: string | null | undefined): string {
   if (value === null || value === undefined) return INFO_MISSING;
   const trimmed = value.trim();
@@ -10,7 +18,7 @@ export function formatPriceKrw(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return INFO_MISSING;
   }
-  return `${ value.toLocaleString("ko-KR") }원`;
+  return `${value.toLocaleString("ko-KR")}원`;
 }
 
 export function formatNumberUnit(
@@ -20,7 +28,7 @@ export function formatNumberUnit(
   if (value === null || value === undefined || Number.isNaN(value)) {
     return INFO_MISSING;
   }
-  return `${ value.toLocaleString("ko-KR") }${ unit }`;
+  return `${value.toLocaleString("ko-KR")}${unit}`;
 }
 
 export function formatRegistration(
@@ -31,9 +39,9 @@ export function formatRegistration(
     return INFO_MISSING;
   }
   if (month === null || month === undefined) {
-    return `${ year }년`;
+    return `${year}년`;
   }
-  return `${ year }년 ${ month }월`;
+  return `${year}년 ${month}월`;
 }
 
 export function formatCapturedDate(iso: string | null | undefined): string {
@@ -49,7 +57,7 @@ export function formatCapturedDate(iso: string | null | undefined): string {
   const dd = String(parsed.getDate()).padStart(2, "0");
   const hh = String(parsed.getHours()).padStart(2, "0");
   const min = String(parsed.getMinutes()).padStart(2, "0");
-  return `${ yyyy }-${ mm }-${ dd } ${ hh }:${ min }`;
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
 }
 
 export function formatCpuSummary(
