@@ -91,7 +91,10 @@ _CAR_EXTRACTION_INSTRUCTIONS = (
 
 def _is_generic_ev_category(message: str) -> bool:
     text = message.casefold()
-    if any(term in text for term in ("하이브리드", "내연기관", "휘발유", "전기차 말고", "전기차 제외", "전기차가 아닌")):
+    if any(term in text for term in (
+        "수소", "디젤", "경유", "휘발유", "가솔린", "하이브리드", "내연기관",
+        "말고", "제외", "대신", "아닌", "아니라", "비전기차",
+    )):
         return False
     return bool(re.search(r"전기\s*차|전기\s*자동차|\bev\b", text))
 
@@ -102,6 +105,26 @@ def _is_redundant_ev_category_field(field: str) -> bool:
         "ev", "전기차", "전기자동차", "중고전기차", "electricvehicle", "electriccar", "usedelectricvehicle",
         "fuel", "fueltype", "vehiclefueltype", "vehicletype", "fueltypeev", "vehicletypeev",
     }
+
+
+def _has_other_unsupported_car_request(message: str) -> bool:
+    text = message.casefold()
+    return any(term in text for term in (
+        "수소", "디젤", "경유", "휘발유", "가솔린", "하이브리드", "내연기관",
+        "배터리", "battery", "soh", "충전 속도", "충전속도", "충전 속", "급속 충전", "완속 충전",
+        "1회 충전", "1회충전", "주행 가능 거리", "주행가능거리", "항속거리", "1회 주행",
+    ))
+
+
+def _is_ev_category_clarification(question: str | None) -> bool:
+    if not question:
+        return False
+    text = question.casefold()
+    refers_to_ev_category = bool(re.search(r"전기\s*차|전기\s*자동차|\bev\b|연료|fuel[_ ]?type", text))
+    says_unavailable = any(term in text for term in (
+        "지원하지", "지원되지", "미지원", "검색할 수 없", "검색 불가", "데이터에 없", "포함되지",
+    ))
+    return refers_to_ev_category and says_unavailable
 
 
 class VertexGeminiAdapter:
@@ -256,11 +279,23 @@ class VertexGeminiAdapter:
         if output_schema is FilterExtraction:
             data = validated.model_dump(exclude_none=True)
             if schema is _CarExtraction and _is_generic_ev_category(prompt["message"]):
+                removed_category = False
                 for field_name in ("unsupported_fields", "ambiguous_fields"):
-                    data[field_name] = [
-                        field for field in data.get(field_name, [])
-                        if not _is_redundant_ev_category_field(field)
-                    ]
+                    retained = []
+                    for field in data.get(field_name, []):
+                        if _is_redundant_ev_category_field(field):
+                            removed_category = True
+                        else:
+                            retained.append(field)
+                    data[field_name] = retained
+                if (
+                    removed_category
+                    and not data.get("unsupported_fields")
+                    and not data.get("ambiguous_fields")
+                    and not _has_other_unsupported_car_request(prompt["message"])
+                    and _is_ev_category_clarification(data.get("clarification_question"))
+                ):
+                    data["clarification_question"] = None
             filters = data.get("filters") or {}
             if isinstance(filters, BaseModel):
                 filters = filters.model_dump(exclude_none=True)

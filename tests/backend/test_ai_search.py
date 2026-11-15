@@ -1,4 +1,5 @@
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.ai_search.llm import get_llm_adapter
+from app.ai_search.vertex_gemini_adapter import VertexGeminiAdapter
 from app.database import get_db
 from app.main import app
 from app.routers import ai_search
@@ -242,6 +244,39 @@ def test_vague_battery_question_keeps_selected_car_domain(client, monkeypatch):
     assert "데이터가 없어" in body["clarification_question"]
     assert "노트북과 자동차 중" not in body["clarification_question"]
     search.assert_not_called()
+
+
+def test_vertex_category_only_clarification_is_removed_before_car_search(client, monkeypatch):
+    monkeypatch.setattr("google.auth.default", Mock(return_value=(object(), "ignored")))
+    generate = Mock(side_effect=[
+        SimpleNamespace(parsed={"domain": "cars", "intent": "search"}),
+        SimpleNamespace(parsed={
+            "domain": "cars",
+            "filters": {"manufacturer": "현대", "max_price_krw": 30000000},
+            "unsupported_fields": ["fuel_type"],
+            "clarification_question": "전기차 카테고리는 지원하지 않습니다.",
+        }),
+    ])
+    adapter = VertexGeminiAdapter(
+        project_id="test-project",
+        location="global",
+        model="gemini-test",
+        client_factory=Mock(return_value=SimpleNamespace(models=SimpleNamespace(generate_content=generate))),
+    )
+    app.dependency_overrides[get_llm_adapter] = lambda: adapter
+    set_search_results(monkeypatch, cars=car_result())
+
+    response = client.post("/api/ai/search", json={
+        "domain": "cars",
+        "message": "현대 전기차 3천만 원 이하",
+    })
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["clarification_required"] is False
+    assert body["applied_filters"] == {"manufacturer": "현대", "max_price_krw": 30000000}
+    assert body["total"] == 1
+    assert generate.call_count == 2
 
 
 def test_explicit_notebook_request_after_car_selection_keeps_domain_conflict(client, monkeypatch):
