@@ -1,4 +1,5 @@
 import json
+import re
 from decimal import Decimal
 from typing import Any, Literal, TypedDict
 
@@ -134,6 +135,27 @@ def _notice(domain: SearchDomain | None) -> str:
     return "검색 결과는 데이터베이스에 저장된 수집 시점의 스냅샷을 기준으로 합니다."
 
 
+def _mentions_domain(message: str, domain: SearchDomain) -> bool:
+    text = message.casefold()
+    if domain == "cars":
+        return any(term in text for term in ("자동차", "차량", "전기차", "전기 자동차", "중고차", "매물", "car", "vehicle")) or bool(
+            re.search(r"\bev(?:\d+)?\b", text)
+        )
+    return any(term in text for term in ("노트북", "맥북", "laptop", "notebook"))
+
+
+def _explicitly_requests_other_domain(message: str, selected_domain: SearchDomain) -> bool:
+    other_domain: SearchDomain = "notebooks" if selected_domain == "cars" else "cars"
+    return _mentions_domain(message, other_domain) and not _mentions_domain(message, selected_domain)
+
+
+def _is_domain_choice_question(question: str | None) -> bool:
+    if not question:
+        return False
+    text = question.casefold()
+    return any(term in text for term in ("어느 분야", "분야를 선택", "분야를 알려", "노트북과 자동차 중", "자동차와 노트북 중"))
+
+
 def intent_classification(state: AISearchState) -> dict[str, Any]:
     request = state["request"]
     context = request.conversation_context
@@ -148,16 +170,26 @@ def intent_classification(state: AISearchState) -> dict[str, Any]:
     assert isinstance(intent, IntentClassification)
 
     question = intent.clarification_question
-    domain = request.domain or intent.domain
-    if request.domain and intent.domain and request.domain != intent.domain:
-        question = "요청한 검색 분야와 문장에서 파악한 분야가 다릅니다. 노트북과 자동차 중 어느 쪽을 검색할까요?"
-    elif context and intent.domain and context.domain != intent.domain:
-        question = "이전 검색 분야와 새 요청의 분야가 다릅니다. 어느 분야의 검색을 이어갈까요?"
+    selected_domain = request.domain or (context.domain if context else None)
+    domain = selected_domain or intent.domain
+    explicit_conflict = bool(selected_domain and _explicitly_requests_other_domain(request.message, selected_domain))
+    if explicit_conflict:
+        question = "요청한 분야와 문장에서 명시한 분야가 다릅니다. 노트북과 자동차 중 어느 쪽을 검색할까요?"
+    elif selected_domain and _is_domain_choice_question(question):
+        # A selected tab or conversation context resolves an otherwise generic
+        # model question. Do not interpret a battery mention as a domain switch.
+        question = None
     elif domain is None and intent.intent in ("refine", "sort_only") and context:
         domain = context.domain
 
     if intent.intent == "clarify" and not question:
-        question = "검색 분야나 조건을 조금 더 구체적으로 알려주세요."
+        if selected_domain == "cars" and any(term in request.message.casefold() for term in ("배터리", "battery", "soh")):
+            question = "자동차 배터리 상태·수명 데이터가 없어 해당 기준으로 검색할 수 없습니다. 가격, 등록연도, 매물 주행거리 등 지원하는 조건을 알려주세요."
+        elif selected_domain:
+            question = "자동차" if selected_domain == "cars" else "노트북"
+            question = f"{question} 검색 조건을 조금 더 구체적으로 알려주세요."
+        else:
+            question = "검색 분야나 조건을 조금 더 구체적으로 알려주세요."
     elif domain is None and not question:
         question = "노트북과 자동차 중 어떤 분야를 검색할까요?"
     elif intent.intent == "sort_only" and context is None and not question:

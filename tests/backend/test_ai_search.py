@@ -1,4 +1,5 @@
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.ai_search.llm import get_llm_adapter
+from app.ai_search.vertex_gemini_adapter import VertexGeminiAdapter
 from app.database import get_db
 from app.main import app
 from app.routers import ai_search
@@ -98,6 +100,10 @@ PROMPT_CASES = [
     ("무겁지 않은 노트북", "notebooks", "search", {}, {"ambiguous_fields": ["weight_kg"], "clarification_question": "가벼운 무게 기준을 알려주세요."}, None),
     ("성능 좋은 노트북", "notebooks", "search", {}, {"ambiguous_fields": ["performance"], "clarification_question": "원하는 CPU 또는 RAM 기준을 알려주세요."}, None),
     ("현대 전기차 3천만 원 이하 주행거리 5만 km 이하", "cars", "search", {"manufacturer": "현대", "max_price_krw": 30000000, "max_mileage_km": 50000}, None, {"manufacturer": "현대", "max_price_krw": 30000000, "max_mileage_km": 50000}),
+    ("현대 전기차 3천만 원 이하", "cars", "search", {"manufacturer": "현대", "max_price_krw": 30000000}, None, {"manufacturer": "현대", "max_price_krw": 30000000}),
+    ("기아 EV6 2023년 이후", "cars", "search", {"manufacturer": "기아", "model": "EV6", "registration_year_min": 2023}, None, {"manufacturer": "기아", "model": "EV6", "registration_year_min": 2023}),
+    ("전기차 매물 보여줘", "cars", "search", {}, None, {}),
+    ("현대 3천만 원 이하 매물 보여줘", "cars", "search", {"manufacturer": "현대", "max_price_krw": 30000000}, None, {"manufacturer": "현대", "max_price_krw": 30000000}),
     ("기아 전기차 2천만 원 이상", "cars", "search", {"manufacturer": "기아", "min_price_krw": 20000000}, None, {"manufacturer": "기아", "min_price_krw": 20000000}),
     ("아이오닉 5 찾아줘", "cars", "search", {"model": "아이오닉 5"}, None, {"model": "아이오닉 5"}),
     ("2022년 이후 등록된 차", "cars", "search", {"registration_year_min": 2022}, None, {"registration_year_min": 2022}),
@@ -195,6 +201,131 @@ def test_unsupported_battery_field_requires_clarification(client, monkeypatch):
     search.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "message,unsupported",
+    [
+        ("배터리 SOH 90% 이상인 현대 전기차", ["battery_soh"]),
+        ("1회 충전으로 500km 이상 가는 차량", ["range_per_charge"]),
+    ],
+)
+def test_unavailable_battery_specs_require_clarification_without_search(client, monkeypatch, message, unsupported):
+    fake = FakeLLM(
+        {"domain": "cars", "intent": "search"},
+        {"domain": "cars", "filters": {"manufacturer": "현대"}, "unsupported_fields": unsupported},
+    )
+    search = Mock()
+    monkeypatch.setattr("app.ai_search.graph.search_cars", search)
+
+    response = run_search(client, fake, domain="cars", message=message)
+
+    assert response.status_code == 200
+    assert response.json()["domain"] == "cars"
+    assert response.json()["clarification_required"] is True
+    assert "검색할 수 없습니다" in response.json()["clarification_question"]
+    search.assert_not_called()
+
+
+def test_vague_battery_question_keeps_selected_car_domain(client, monkeypatch):
+    fake = FakeLLM(
+        {"domain": "notebooks", "intent": "clarify", "clarification_question": "노트북과 자동차 중 어느 분야를 검색할까요?"},
+        {"domain": "cars", "filters": {}, "unsupported_fields": ["battery_life"]},
+    )
+    search = Mock()
+    monkeypatch.setattr("app.ai_search.graph.search_cars", search)
+    monkeypatch.setattr("app.ai_search.graph.search_notebooks", search)
+
+    response = run_search(client, fake, domain="cars", message="배터리 오래가는 걸로 추천해줘")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["domain"] == "cars"
+    assert body["clarification_required"] is True
+    assert "배터리" in body["clarification_question"]
+    assert "데이터가 없어" in body["clarification_question"]
+    assert "노트북과 자동차 중" not in body["clarification_question"]
+    search.assert_not_called()
+
+
+def test_vertex_category_only_clarification_is_removed_before_car_search(client, monkeypatch):
+    monkeypatch.setattr("google.auth.default", Mock(return_value=(object(), "ignored")))
+    generate = Mock(side_effect=[
+        SimpleNamespace(parsed={"domain": "cars", "intent": "search"}),
+        SimpleNamespace(parsed={
+            "domain": "cars",
+            "filters": {"manufacturer": "현대", "max_price_krw": 30000000},
+            "unsupported_fields": ["fuel_type"],
+            "clarification_question": "전기차 카테고리는 지원하지 않습니다.",
+        }),
+    ])
+    adapter = VertexGeminiAdapter(
+        project_id="test-project",
+        location="global",
+        model="gemini-test",
+        client_factory=Mock(return_value=SimpleNamespace(models=SimpleNamespace(generate_content=generate))),
+    )
+    app.dependency_overrides[get_llm_adapter] = lambda: adapter
+    set_search_results(monkeypatch, cars=car_result())
+
+    response = client.post("/api/ai/search", json={
+        "domain": "cars",
+        "message": "현대 전기차 3천만 원 이하",
+    })
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["clarification_required"] is False
+    assert body["applied_filters"] == {"manufacturer": "현대", "max_price_krw": 30000000}
+    assert body["total"] == 1
+    assert generate.call_count == 2
+
+
+def test_explicit_notebook_request_after_car_selection_keeps_domain_conflict(client, monkeypatch):
+    fake = FakeLLM({"domain": "notebooks", "intent": "search"}, {"domain": "notebooks", "filters": {}})
+    search = Mock()
+    monkeypatch.setattr("app.ai_search.graph.search_cars", search)
+    monkeypatch.setattr("app.ai_search.graph.search_notebooks", search)
+
+    response = run_search(client, fake, domain="cars", message="노트북 찾아줘")
+
+    assert response.status_code == 200
+    assert response.json()["domain"] == "cars"
+    assert response.json()["clarification_required"] is True
+    assert "분야가 다릅니다" in response.json()["clarification_question"]
+    search.assert_not_called()
+
+
+def test_car_follow_up_preserves_existing_price_and_mileage_context(client, monkeypatch):
+    fake = FakeLLM(
+        {"domain": "notebooks", "intent": "refine", "clarification_question": "노트북과 자동차 중 어느 분야를 검색할까요?"},
+        {"domain": "cars", "filters": {"manufacturer": "현대"}},
+    )
+    set_search_results(monkeypatch, cars=car_result())
+    context = {"domain": "cars", "filters": {"max_price_krw": 30000000, "max_mileage_km": 50000}}
+
+    response = run_search(client, fake, domain="cars", message="현대차로 좁혀줘", context=context)
+
+    assert response.status_code == 200
+    assert response.json()["domain"] == "cars"
+    assert response.json()["applied_filters"] == {
+        "manufacturer": "현대", "max_price_krw": 30000000, "max_mileage_km": 50000,
+    }
+
+
+def test_car_filter_field_outside_whitelist_is_rejected(client, monkeypatch):
+    fake = FakeLLM(
+        {"domain": "cars", "intent": "search"},
+        {"domain": "cars", "filters": {"battery_soh": 90}},
+    )
+    search = Mock()
+    monkeypatch.setattr("app.ai_search.graph.search_cars", search)
+
+    response = run_search(client, fake, domain="cars", message="배터리 SOH 90%")
+
+    assert response.status_code == 502
+    assert response.json()["code"] == "AI_OUTPUT_INVALID"
+    search.assert_not_called()
+
+
 def test_model_clarification_question_prevents_search_even_without_flag(client, monkeypatch):
     fake = FakeLLM(
         {"domain": "notebooks", "intent": "search"},
@@ -254,10 +385,24 @@ def test_provider_failure_is_distinct_from_database_failure(client, monkeypatch)
     assert response.json()["code"] == "DB_UNAVAILABLE"
 
 
-def test_unconfigured_production_adapter_never_returns_fake_results(client):
-    response = client.post("/api/ai/search", json={"domain": "notebooks", "message": "RAM 16GB"})
+
+def test_unconfigured_production_adapter_never_returns_fake_results(
+    client, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        "app.ai_search.llm._VERTEX_ENV_FILE",
+        tmp_path / "missing.env",
+    )
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+
+    response = client.post(
+        "/api/ai/search",
+        json={"domain": "notebooks", "message": "RAM 16GB"},
+    )
+
     assert response.status_code == 503
     assert response.json()["code"] == "AI_MODEL_UNAVAILABLE"
+
 
 
 def test_untrusted_context_is_validated_before_model_or_search(client, monkeypatch):
