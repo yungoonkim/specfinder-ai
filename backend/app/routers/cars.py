@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -24,5 +24,5 @@ def detail(listing_id: str, db: Annotated[Session, Depends(get_db)]):
 
 
 @router.get("", response_model=PageResult[CarItem])
-def search(params: Annotated[CarFilters, Depends()], db: Annotated[Session, Depends(get_db)]):
+def search(params: Annotated[CarFilters, Query()], db: Annotated[Session, Depends(get_db)]):
     return search_cars(db, params)

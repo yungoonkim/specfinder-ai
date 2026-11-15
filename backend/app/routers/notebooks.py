@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -24,5 +24,5 @@ def detail(product_code: int, db: Annotated[Session, Depends(get_db)]):
 
 
 @router.get("", response_model=PageResult[NotebookItem])
-def search(params: Annotated[NotebookFilters, Depends()], db: Annotated[Session, Depends(get_db)]):
+def search(params: Annotated[NotebookFilters, Query()], db: Annotated[Session, Depends(get_db)]):
     return search_notebooks(db, params)
