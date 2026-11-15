@@ -1,115 +1,91 @@
-# SpecFinder AI — 사람이 이해하는 시스템 구조
+# SpecFinder AI — 실제 구현 아키텍처 (MVP v0.1.0)
 
-> **문서 성격:** 설계된 구조(목표)를 설명하는 문서입니다. 아직 구현·동작이 확인되지 않은 파일과 함수는 **예정**으로 표시합니다.
-> 기준: `docs/PRD.md`, `docs/TECH_STACK.md`, `docs/API_CONTRACT.md`, `docs/PROJECT_STRUCTURE.md`
-> 갱신 시점: 주요 모듈·데이터 흐름이 바뀌거나 통합 검증을 완료했을 때. 매 코드 수정마다 갱신하지 않습니다.
+> 기준: 2026-11-15, GitHub `main` PR #1·#2·#3 병합 후 코드와 실데이터 통합 검증 결과.
+> **현재 구현**과 **2차 개발 예정**을 명확히 분리한다.
 
-## 1. 사용자 눈높이 한 문장
-
-노트북 또는 자동차 탭에서 조건을 선택하면, **Next.js 화면**이 **FastAPI**에 요청하고, FastAPI가 **PostgreSQL의 해당 테이블**을 조회해 목록으로 돌려주는 서비스입니다.
-
-## 2. 전체 흐름 (설계)
+## 1. 실제 실행 구성
 
 ```text
-[사용자 브라우저]
-  노트북 탭 / 자동차 탭
-         |
-         v
-[frontend/ — Next.js + React + TypeScript]
-  체크박스·가격 범위·정렬·페이지
-         | HTTP GET /api/notebooks 또는 /api/cars
-         v
-[backend/ — FastAPI + Pydantic]
-  파라미터 검증 → 검색 서비스 함수 호출
-         | SQLAlchemy 매개변수화 SELECT
-         v
-[PostgreSQL — 2개 테이블]
-  notebooks / cars
-         |
-         v
-FastAPI가 JSON {items, total, page, page_size} 반환
-         |
-         v
-Next.js가 카드·결과 건수·빈 결과/오류 표시
+[사용자 Chrome 브라우저]
+       │ 탭/필터/정렬/상세 조작
+       ▼
+[Next.js + React + TypeScript]  http://localhost:3000
+  frontend/app/, frontend/components/, frontend/lib/api.ts
+       │ 브라우저에서 FastAPI HTTP GET · JSON 교환
+       ▼
+[FastAPI + Pydantic + SQLAlchemy]  http://127.0.0.1:8000
+  backend/app/main.py → routers/ → services/
+       │ 검증된 파라미터를 이용한 SQLAlchemy SELECT
+       ▼
+[PostgreSQL 16 — Docker Desktop / WSL2]
+  Windows 127.0.0.1:5433 → 컨테이너 5432
+  notebooks: 2,181행 / cars: 302행 (테스트 스냅샷)
+       │ 검색 결과
+       ▼
+FastAPI JSON {items, total, page, page_size, total_pages}
+       │
+       ▼
+React의 카드·상세·페이지네이션·오류 UI
 ```
 
-**React**는 화면의 상호작용을 담당하는 UI 라이브러리입니다. **Next.js**는 React 페이지와 라우팅/렌더링을 담당하는 프레임워크입니다. **Node.js**는 Next.js 개발 서버와 서버 측 JavaScript 실행에 쓰이는 런타임입니다. DB SQL 검색은 **Node.js가 아니라 Python FastAPI**가 담당합니다.
+세 서버는 개발 PC에서 독립 실행된다. **Docker는 DBMS가 아니라 PostgreSQL 프로세스를 컨테이너로 실행하는 환경**이다. Next.js 개발 서버는 Node.js에서 실행되고, React UI는 브라우저에서 상호작용한다.
 
-## 3. 실제로 RAM 16GB 이상을 선택하면? (구현 후 확인할 경로)
+## 2. 실제 파일별 역할
 
-1. 사용자가 노트북 화면에서 `RAM ≥ 16GB`를 선택합니다.
-2. 프론트 필터 상태가 `min_ram_gb=16`으로 바뀝니다.
-3. API 모듈이 `GET /api/notebooks?min_ram_gb=16`을 요청합니다.
-4. FastAPI가 Pydantic으로 값의 범위를 확인합니다.
-5. 검색 서비스가 `notebooks.ram_gb >= 16`에 해당하는 매개변수화 SQL을 구성합니다.
-6. PostgreSQL에서 찾은 데이터를 API 계약의 JSON 구조로 반환합니다.
-7. 화면에서 결과 개수와 노트북 카드를 갱신합니다.
+| 경로 | 역할 | 확인 상태 |
+|---|---|---|
+| `frontend/app/notebooks/`, `frontend/app/cars/` | 노트북·자동차 라우팅/페이지 | 구현 |
+| `frontend/components/` | 필터·결과 카드·UI 상태 | 구현 |
+| `frontend/lib/api.ts` | API_BASE_URL, 요청·오류 처리, Mock fallback 설정 | 구현 |
+| `backend/app/main.py` | FastAPI 애플리케이션, CORS·예외 핸들러 | 구현 |
+| `backend/app/routers/notebooks.py`, `cars.py` | 목록·facets·상세 API, 검색 쿼리 모델 검증 | 구현 |
+| `backend/app/schemas.py` | Pydantic 필터·응답 모델 및 Decimal JSON 숫자 직렬화 | 구현 |
+| `backend/app/services/notebook_search.py`, `car_search.py` | SQL 조건 조합·정렬·페이지네이션·상세 조회 | 구현 |
+| `backend/app/database.py`, `models.py` | PostgreSQL 접속 세션·ORM 매핑 | 구현 |
+| `data/scripts/` | CSV 적재 스크립트 | 구현 |
+| `tests/backend/test_api_stabilization.py` | FastAPI TestClient 격리 회귀 테스트 19개 | 구현·실행 |
 
-> 위 1~7은 **목표 동작 흐름**입니다. 실제 파일명·함수명·성공 여부는 소스 구현 후 해당 경로를 읽어서 확정합니다.
+## 3. 실제 요청 처리 예
 
-## 4. 역할별 예정 경로
+1. 사용자가 `/notebooks`에서 RAM `≥16GB`, 관측 최저가 `≤1,500,000원`을 입력한다.
+2. `frontend/lib/api.ts`가 `GET /api/notebooks?min_ram_gb=16&max_price_krw=1500000` 같은 요청을 만든다.
+3. `backend/app/routers/notebooks.py`에서 `NotebookFilters`를 FastAPI `Query()`로 검증한다.
+4. 잘못된 범위면 DB 검색을 수행하지 않고 **422 `INVALID_FILTER`**를 반환한다.
+5. 유효하면 `search_notebooks`가 `notebooks.ram_gb`, `notebooks.min_observed_configuration_price_krw`로 조건 SQL을 실행한다.
+6. PostgreSQL이 검색 결과를 반환하고 FastAPI가 JSON으로 응답한다. `ram_gb` 등 Decimal은 응답 JSON에서만 number로 변환한다.
+7. React가 카드·총 건수·페이지 및 필터 조건을 표시한다.
 
-| 역할 | 예정 파일/디렉터리 | 무엇을 담당? | 현재 실제 구현 확인 |
-|---|---|---|---|
-| 화면 및 페이지 | `frontend/app/notebooks/`, `frontend/app/cars/` | 탭 및 화면 라우팅 | 미확인 |
-| 필터·결과 UI | `frontend/components/` | 사용자 입력·검색 결과 표현 | 미확인 |
-| API 호출 | `frontend/lib/api.ts` | FastAPI HTTP 요청과 응답 수신 | 미확인 |
-| API 타입 | `frontend/types/api.ts` | 프론트에서 쓰는 JSON 타입 | 미확인 |
-| FastAPI 진입점 | `backend/app/main.py` | 앱 실행, CORS, 라우터 구성 | 미확인 |
-| API 라우터 | `backend/app/routers/` | 요청 검증·응답 | 미확인 |
-| SQL 검색 서비스 | `backend/app/services/` | 필터 조합, 페이징, 정렬 | 미확인 |
-| DB 테이블 모델 | `backend/app/models.py` | `notebooks`, `cars` 매핑 | 미확인 |
-| CSV 적재 | `data/scripts/` | 원본 CSV → 정규화 DB 적재 | 미확인 |
-| 데이터 원본 | `data/raw/` | CSV 원본 보존 | 미확인 |
+자동차도 같은 구조이며 `search_cars`가 `cars` 테이블을 조회한다. 자동차 `listing_id`는 `direct:61386067`처럼 `:`를 포함할 수 있어 문자열로 보존한다.
 
-경로가 실제 구현과 달라지면 **계약 변경 여부를 확인한 뒤 이 표를 수정**합니다. 폴더를 계획대로 만드는 것이 목적이 아니라 실행되는 코드를 이해하기 위한 지도입니다.
+## 4. 데이터/검증 정책
 
-## 5. 데이터가 들어오는 흐름 (설계)
+- DB 업무 테이블은 `notebooks`, `cars` **2개**이며 원본의 전체 CSV 필드는 각 테이블의 `raw_data JSONB`에 보존한다.
+- 노트북 `price_krw` = `min_observed_configuration_price_krw` (최저 관측 구성 가격); 자동차 `price_krw` = `asking_price_krw` (희망가).
+- 누락값은 `null`/`정보 없음` 처리, 조건이 있는 경우 NULL 값은 필터에 일치하지 않음.
+- 자동차 `source_url`은 수집 데이터 전체에서 공통 검색 URL이며, 개별 매물 상세 링크를 임의로 생성하지 않는다.
+- 원본 데이터는 수집 시점의 스냅샷이며 실시간 시세와 판매 상태를 보장하지 않는다.
+- `NEXT_PUBLIC_USE_MOCK=false`와 브라우저 sessionStorage 설정을 함께 확인해야 실데이터 모드를 확정할 수 있다.
+
+## 5. 검사·수정 이력
+
+- 1차 Computer Use QA에서 역전 범위 오류가 HTTP 500, 노트북 Decimal JSON이 문자열이었던 문제 발견.
+- PR #3으로 검색 쿼리 모델을 `Depends()` → `Query()`로 변경하고 요청 오류를 HTTP 422로 정리.
+- Decimal은 DB/검색 로직에서는 유지하고 HTTP JSON 직렬화에서만 숫자로 변환.
+- 로컬 pytest 19 PASS, 실제 DB 2,181/302건 조회, Browser QA 36 PASS 보고. 실제 서버 중단 테스트 2건은 BLOCKED.
+
+## 6. 2차 개발 예정 — 현재 구현된 기능 아님
 
 ```text
-원본 CSV (내용 수정·삭제 금지)
-    |
-    v
-Python 스크립트: 문자열 우선 읽기, ID/날짜/가격/NULL 검증
-    |
-    v
-PostgreSQL  notebooks / cars
-    ├─ 검색용 정형 컬럼
-    └─ raw_data JSONB: 원본 컬럼 보존
+[Next.js 채팅창]       (미구현)
+      │ 자연어 요청
+      ▼
+[FastAPI AI 검색 API]   (설계 예정)
+      │
+[LLM → 검증된 필터 JSON → LangGraph 검색 Tool]
+      │
+[기존 search_notebooks / search_cars] → PostgreSQL
+      │
+[근거가 있는 결과 카드 + 검색 조건 설명]
 ```
 
-- 노트북: `product_code BIGINT`; 최저 관측 가격과 해당 구성 가격은 서로 다릅니다.
-- 전기차: `listing_id TEXT`(`:` 포함 가능); 가격은 수집 당시 희망가입니다.
-- NULL을 임의로 0으로 만들지 않습니다. 원본 컬럼과 전처리 규칙은 `docs/DATA_DICTIONARY.md`가 최종 기준입니다.
-
-## 6. 나중에 LangGraph를 붙일 위치
-
-```text
-[2차] 자연어 채팅 → backend/app/agents/ (예정)
-                            |
-                            v
-                  기존 Python SQL 검색 서비스 재사용
-                            |
-                            v
-                       PostgreSQL
-```
-
-MVP에서는 LangGraph·AI 채팅·RAG를 구현하지 않습니다. 추후에도 SQL 조건 필터는 기존 검색 함수를 재사용합니다.
-
-## 7. 통합 이후 실제 구조 기록 양식
-
-다음 항목은 **코드 구현·병합 이후 실제 내용을 확인한 다음에만** 채웁니다.
-
-```md
-### [사용자 동작명]
-- 화면 컴포넌트: `frontend/...` / 함수명:
-- API 호출 코드: `frontend/...` / 함수명:
-- FastAPI 라우터: `backend/...` / 함수명:
-- SQL 서비스: `backend/...` / 함수명:
-- DB 테이블·핵심 컬럼:
-- 사용자가 직접 확인하는 방법:
-- 실제 확인 결과/미확인 사항:
-- 근거: PR/커밋:
-```
-
-**문서 원칙:** 구현 전에는 설계/예정, 실제 소스 확인 후에는 현재 동작을 구분하여 적습니다.
+2차에서도 SQL 조회 함수를 재사용하고, LLM이 임의의 가격·사양·매물 사실을 만들어내지 못하도록 검색 결과를 응답 근거로 삼는다. AI 검색 API의 정확한 형태는 별도 계약을 확정한 후 구현한다.
