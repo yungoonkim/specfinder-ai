@@ -1,1 +1,3 @@
 data/raw/*.csv
+# Local notebook datasets and enrichment results
+/data/enrichment/
