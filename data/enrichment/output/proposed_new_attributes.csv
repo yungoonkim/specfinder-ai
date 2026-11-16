@@ -1,0 +1,3 @@
+﻿proposed_attribute_name,value_type,example_product_code,example_value,rationale,source_url,checked_at
+battery_life_test_standard,text,63479408,Local video (1080p) playback@150nits (MobileMark 2018: 8.3 hr),max_battery_hours가 측정 기준(Local video vs MobileMark 2018 vs Streaming)에 따라 크게 달라 기준 병기 시 정확성 향상,https://psref.lenovo.com/Product/Lenovo/Lenovo_V15_G4_ABP?tab=spec,2026-11-16T16:30:00+09:00
+panel_technology,text,122721671,OLED,IPS / OLED / TN / PixelSense / Liquid Retina 등 패널 타입은 기존 40컬럼 및 35개 카탈로그에 없음,https://www.razer.com/gaming-laptops/razer-blade-16/tech-specs,2026-11-16T16:30:00+09:00
